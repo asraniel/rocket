@@ -62,7 +62,7 @@ static inline unsigned int Hash(void* key)
     // completely changed for 64-bit keys.
 #pragma warning( push )
 #pragma warning( disable : 4311 )
-    unsigned int a = reinterpret_cast<unsigned int>(key);
+    unsigned int a = (unsigned int)reinterpret_cast<unsigned long>(key);
 #pragma warning( pop ) 
     a = (a+0x7ed55d16) + (a<<12);
     a = (a^0xc761c23c) ^ (a>>19);
