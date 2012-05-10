@@ -39,7 +39,7 @@ enum Tag
     Tag_Thread          = ~8u,
     Tag_Number          = ~9u,
 };
-STATIC_ASSERT( sizeof(Tag) == 4, TagMustBe32Bits );
+//STATIC_ASSERT( sizeof(Tag) == 4, TagMustBe32Bits );
 
 #define LUA_TPROTOTYPE      9
 #define LUA_TUPVALUE        10
@@ -83,7 +83,7 @@ union Value
         Tag             tag;
     };
 };
-STATIC_ASSERT( offsetof(Value, tag) == 4, TagMustBeMSW );
+//STATIC_ASSERT( offsetof(Value, tag) == 4, TagMustBeMSW );
 
 /** Returns true if the value represents a number type. This function must be
  used in lieu of directly comparing the tag to the TAG_NUMBER value */
