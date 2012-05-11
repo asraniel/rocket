@@ -46,3 +46,4 @@ project "Test"
     files { "src/Test/*.h", "src/Test/*.c", "src/Test/*.cpp" }
     includedirs { "include" }
     links { "Rocket" }
+    defines { "LUA_CORE" }
