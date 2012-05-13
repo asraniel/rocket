@@ -541,7 +541,7 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int index)
         fistp   i
     }
     return i;
-    #elseif
+    #else
     return (lua_Integer) d;
     #endif
 }
