@@ -26,10 +26,11 @@ public:
 #define _TEST_BODY(name)                                \
     public:                                             \
         _Test_##name() : Test(#name) { }                \
-        virtual void Run();                             \
+        void Run(){RunTest(); printf("passed %s\n", #name);}  \
+        virtual void RunTest();                         \
     } _Test_instance_##name;                            \
     static TestRegisterer _Test_register_##name(&_Test_instance_##name); \
-    void _Test_##name::Run()
+    void _Test_##name::RunTest()
 
 #define TEST(name)                                      \
     class _Test_##name : public Test {                  \
