@@ -235,8 +235,18 @@ static int Parser_Arguments(Parser* parser, bool single = false)
 static void Parser_Function(Parser* parser, Expression* dst, bool method)
 {
 
+    lua_State* L = parser->L;
+    
+    Function* function = Function_Create(L);
+    PushFunction(L, function);
+    
+    function->parent = parser->function;
+
     Parser p;
-    Parser_Initialize(&p, parser->L, parser->lexer, parser->function);
+    Parser_Initialize(&p, parser->L, parser->lexer);
+    
+    p.function = function;
+    function->parser = &p;
 
     if (method)
     {
@@ -282,9 +292,12 @@ static void Parser_Function(Parser* parser, Expression* dst, bool method)
 
     // Store in the result parent function.
     dst->type  = EXPRESSION_FUNCTION;
-    dst->index = Parser_AddFunction(parser, p.function);
+    dst->index = Parser_AddFunction(parser, function);
 
-    p.function->parser = NULL;
+    Parser_Destroy(&p);
+
+    ASSERT( (L->stackTop - 1)->object == function );
+    Pop(L, 1);
 
 }
 
@@ -452,7 +465,7 @@ static bool Parser_TryTable(Parser* parser, Expression* dst, int regHint)
     }
     while (hasSep || !Parser_Accept(parser, '}'));
 
-    Instruction inst = Parser_EncodeABC(Opcode_NewTable, dst->index, listSize, hashSize);
+    Instruction inst = Opcode_EncodeABC(Opcode_NewTable, dst->index, listSize, hashSize);
     Parser_UpdateInstruction( parser, start, inst );
 
     if (numFields > 0 || varArg)
@@ -1494,7 +1507,11 @@ static bool Parser_TryFor(Parser* parser)
         return false;
     }
 
+    lua_State* L = parser->L;
+
     Parser_Expect(parser, TokenType_Name);
+
+    PushString(L, Parser_GetString(parser));
 
     Parser_BeginBlock(parser, true);
 
@@ -1507,7 +1524,9 @@ static bool Parser_TryFor(Parser* parser)
     int limitReg         = Parser_AddLocal( parser, String_Create(parser->L, "(for b)") );
     int incrementReg     = Parser_AddLocal( parser, String_Create(parser->L, "(for c)") );
 
-    int externalIndexReg = Parser_AddLocal( parser, Parser_GetString(parser) );
+    String* name = (L->stackTop - 1)->string;
+    int externalIndexReg = Parser_AddLocal( parser, name );
+    Pop(L, 1);
 
     if (Parser_Accept(parser, '='))
     {
@@ -1552,7 +1571,7 @@ static bool Parser_TryFor(Parser* parser)
         // Close the loop and update the forprep instruction with the correct
         // skip amount.
         int skipAmount = static_cast<int>(Parser_GetInstructionCount(parser) - loop - 1);
-        Parser_UpdateInstruction( parser, loop, Parser_EncodeAsBx(Opcode_ForPrep, internalIndexReg, skipAmount) );
+        Parser_UpdateInstruction( parser, loop, Opcode_EncodeAsBx(Opcode_ForPrep, internalIndexReg, skipAmount) );
         Parser_EmitAsBx(parser, Opcode_ForLoop, internalIndexReg, -skipAmount - 1);
     
     }
@@ -1586,7 +1605,7 @@ static bool Parser_TryFor(Parser* parser)
         // Close the loop and update the forprep instruction with the correct
         // skip amount.
         int skipAmount = static_cast<int>(loop - Parser_GetInstructionCount(parser) - 1);
-        Parser_UpdateInstruction( parser, loop, Parser_EncodeAsBx(Opcode_Jmp, 0, -skipAmount - 2) );
+        Parser_UpdateInstruction( parser, loop, Opcode_EncodeAsBx(Opcode_Jmp, 0, -skipAmount - 2) );
         Parser_EmitABC(parser, Opcode_TForLoop, internalIndexReg, 0, numArgs);
         Parser_EmitAsBx(parser, Opcode_Jmp, 0, skipAmount);
 
@@ -1779,10 +1798,17 @@ Prototype* Parse(lua_State* L, Input* input, const char* name)
     Lexer_Initialize(&lexer, L, input);
 
     Parser parser;
-    Parser_Initialize(&parser, L, &lexer, NULL);
+    Parser_Initialize(&parser, L, &lexer);
+
+    // Keep the function on the stack so that it's not garbage collected.
+    Function* function = Function_Create(L);
+    PushFunction(L, function);
 
     // Top level block accepts a variable number of arguments.
-    parser.function->varArg = true;
+    function->varArg = true;
+
+    parser.function = function;
+    function->parser = &parser;
 
     Parser_Block(&parser, TokenType_EndOfStream);
     Parser_EmitAB(&parser, Opcode_Return, 0, 1);
@@ -1792,6 +1818,9 @@ Prototype* Parse(lua_State* L, Input* input, const char* name)
 
     Parser_Destroy(&parser);
     Lexer_Destroy(&lexer);
+
+    ASSERT( (L->stackTop - 1)->object == function );
+    Pop(L, 1);
 
     return prototype;
 
