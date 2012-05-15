@@ -16,18 +16,13 @@
 
 #include <memory.h>
 
-void Parser_Initialize(Parser* parser, lua_State* L, Lexer* lexer, Function* parent)
+Function* Function_Create(lua_State* L)
 {
-    
-    parser->L                   = L;
-    parser->lexer               = lexer;
-    parser->numBlocks           = 0;
-    parser->lineNumber          = lexer->lineNumber;
 
-    Function* function = static_cast<Function*>( Allocate( L, sizeof(Function) ) );
+    Function* function = static_cast<Function*>( Gc_AllocateObject( L, LUA_TFUNCTIONP, sizeof(Function) ) );
 
-    function->parent            = parent;
-    function->parser            = parser;
+    function->parent            = NULL;
+    function->parser            = NULL;
 
     function->numRegisters      = 0;
     function->maxStackSize      = 0;
@@ -35,7 +30,7 @@ void Parser_Initialize(Parser* parser, lua_State* L, Lexer* lexer, Function* par
     function->varArg            = false;
 
     function->numConstants      = 0;
-    function->constants         = Table_Create(parser->L);
+    function->constants         = NULL;
 
     function->code              = NULL;
     function->codeSize          = 0;
@@ -51,9 +46,37 @@ void Parser_Initialize(Parser* parser, lua_State* L, Lexer* lexer, Function* par
     function->function          = NULL;
     function->numFunctions      = 0;
     function->maxFunctions      = 0;
-        
-    parser->function            = function;
 
+    // It's possible for creating the table to trigger garbage collection, so
+    // make sure there's a reference to our function on the stack before we do
+    // that.
+
+    PushFunction(L, function);
+    function->constants = Table_Create(L);
+    Gc_WriteBarrier(L, function, function->constants);
+    Pop(L, 1);
+
+    return function;
+
+}
+
+void Function_Destroy(lua_State* L, Function* function)
+{
+    Free(L, function->code, function->maxCodeSize * sizeof(Instruction));
+    Free(L, function, sizeof(Function));
+}
+
+void Parser_Initialize(Parser* parser, lua_State* L, Lexer* lexer)
+{
+    parser->L           = L;
+    parser->lexer       = lexer;
+    parser->numBlocks   = 0;
+    parser->lineNumber  = lexer->lineNumber;
+    parser->function    = NULL;
+}
+
+void Parser_Destroy(Parser* parser)
+{
 }
 
 void Parser_Error(Parser* parser, const char* fmt, ...)
@@ -237,6 +260,7 @@ int Parser_AddLocal(Parser* parser, String* name)
     }
 
     function->local[function->numLocals] = name;
+    Gc_WriteBarrier(parser->L, function, name);
     ++function->numLocals;
 
     return function->numLocals - 1;
@@ -347,19 +371,9 @@ int Parser_GetInstructionCount(Parser* parser)
     return function->codeSize;
 }
 
-Instruction Parser_EncodeAsBx(Opcode opcode, int a, int sbx)
-{
-    return opcode | (a << 6) | ((sbx + 131071) << 14);
-}
-
-Instruction Parser_EncodeABC(Opcode opcode, int a, int b, int c)
-{
-    return opcode | (a << 6) | (b << 23) | (c << 14);
-}
-
 int Parser_EmitABC(Parser* parser, Opcode opcode, int a, int b, int c)
 {
-    return Parser_EmitInstruction(parser, Parser_EncodeABC(opcode, a, b, c));
+    return Parser_EmitInstruction(parser, Opcode_EncodeABC(opcode, a, b, c));
 }
 
 void Parser_EmitAB(Parser* parser, Opcode opcode, int a, int b)
@@ -376,7 +390,7 @@ void Parser_EmitABx(Parser* parser, Opcode opcode, int a, int bx)
 
 void Parser_EmitAsBx(Parser* parser, Opcode opcode, int a, int sbx)
 {
-    Parser_EmitInstruction(parser, Parser_EncodeAsBx(opcode, a, sbx));
+    Parser_EmitInstruction(parser, Opcode_EncodeAsBx(opcode, a, sbx));
 }
 
 void Parser_BeginSkip(Parser* parser, int* id)
@@ -387,7 +401,7 @@ void Parser_BeginSkip(Parser* parser, int* id)
 void Parser_EndSkip(Parser* parser, int* id)
 {
     int jumpAmount = static_cast<int>(Parser_GetInstructionCount(parser) - *id - 1);
-    Parser_UpdateInstruction(parser, *id, Parser_EncodeAsBx(Opcode_Jmp, 0, jumpAmount));
+    Parser_UpdateInstruction(parser, *id, Opcode_EncodeAsBx(Opcode_Jmp, 0, jumpAmount));
 }
 
 void Parser_BeginLoop(Parser* parser, int* id)
@@ -563,7 +577,7 @@ static void Parser_UpdateJumpChain(Parser* parser, int jumpPos, int value, int r
             {
                 // Update the instruction to a testset so that we have a value in
                 // the "true" case.
-                inst = Parser_EncodeABC(Opcode_TestSet, reg, GET_A(inst), GET_C(inst));
+                inst = Opcode_EncodeABC(Opcode_TestSet, reg, GET_A(inst), GET_C(inst));
                 Parser_UpdateInstruction(parser, jumpPos - 1, inst);
             }
 
@@ -571,7 +585,7 @@ static void Parser_UpdateJumpChain(Parser* parser, int jumpPos, int value, int r
 
         // Update the jump instruction with the actual amount to jump.
         int jumpAmount = static_cast<int>(startPos - jumpPos - 1);
-        Parser_UpdateInstruction(parser, jumpPos, Parser_EncodeAsBx(Opcode_Jmp, 0, jumpAmount));
+        Parser_UpdateInstruction(parser, jumpPos, Opcode_EncodeAsBx(Opcode_Jmp, 0, jumpAmount));
         
     }
 
@@ -663,13 +677,13 @@ static void Parser_InvertTest(Parser* parser, Expression* value)
         if (GetIsComparison(op))
         {
             int cond = GET_A(inst);
-            inst = Parser_EncodeABC( op, !cond, GET_B(inst), GET_C(inst) );
+            inst = Opcode_EncodeABC( op, !cond, GET_B(inst), GET_C(inst) );
             Parser_UpdateInstruction(parser, pos, inst);
         }
         else if (GetIsTest(op))
         {
             int cond = GET_C(inst);
-            inst = Parser_EncodeABC( op, GET_A(inst), GET_B(inst), !cond );
+            inst = Opcode_EncodeABC( op, GET_A(inst), GET_B(inst), !cond );
             Parser_UpdateInstruction(parser, pos, inst);
         }
 
@@ -799,7 +813,7 @@ static void Parser_UpdateTempLocation(Parser* parser, Expression* value, int reg
     int b = GET_B(inst);
     int c = GET_C(inst);
     
-    inst = Parser_EncodeABC( GET_OPCODE(inst), reg, b, c );
+    inst = Opcode_EncodeABC( GET_OPCODE(inst), reg, b, c );
     Parser_UpdateInstruction( parser, value->index, inst );
 
     value->type = EXPRESSION_REGISTER;
@@ -1034,17 +1048,6 @@ int Parser_AddFunction(Parser* parser, Function* f)
 
 }
 
-static void Function_Destroy(lua_State* L, Function* function)
-{
-    Free(L, function->code, function->maxCodeSize * sizeof(Instruction));
-    Free(L, function, sizeof(Function));
-}
-
-void Parser_Destroy(Parser* parser)
-{
-    Function_Destroy(parser->L, parser->function);
-}
-
 Prototype* Function_CreatePrototype(lua_State* L, Function* function, String* source)
 {
 
@@ -1069,6 +1072,7 @@ Prototype* Function_CreatePrototype(lua_State* L, Function* function, String* so
     for (int i = 0; i < function->numFunctions; ++i)
     {
         prototype->prototype[i] = Function_CreatePrototype(L, function->function[i], source);
+        Gc_WriteBarrier(L, prototype, prototype->prototype[i]);
     }
 
     // Store the constants.
@@ -1093,6 +1097,7 @@ Prototype* Function_CreatePrototype(lua_State* L, Function* function, String* so
         {
             prototype->constant[i] = key;
         }
+        Gc_WriteBarrier(L, prototype, &prototype->constant[i]);
     }
     
     prototype->varArg       = function->varArg;
@@ -1164,7 +1169,7 @@ void Parser_EndBlock(Parser* parser)
     {
         int nextBreakPos = Parser_GetInstruction(parser, breakPos);
         int jumpAmount = currentPos - breakPos - 1;
-        Instruction inst = Parser_EncodeAsBx(Opcode_Jmp, 0, jumpAmount);
+        Instruction inst = Opcode_EncodeAsBx(Opcode_Jmp, 0, jumpAmount);
         Parser_UpdateInstruction(parser, breakPos, inst);
         breakPos = nextBreakPos;
     }

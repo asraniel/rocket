@@ -109,29 +109,28 @@ lua_State* State_Create(lua_Alloc alloc, void* userdata)
     L->errorHandler = NULL;
     L->totalBytes   = size;
 
+    SetNil(&L->dummyObject);
+    SetNil(&L->globals);
+    SetNil(&L->registry);
+
+    memset(L->tagMethodName, 0, sizeof(L->tagMethodName));
+    memset(L->typeName, 0, sizeof(L->typeName));
+    memset(L->metatable, 0, sizeof(L->metatable));
+
     StringPool_Initialize(L, &L->stringPool);
 
     // Always include one call frame which will represent calling into the Lua
     // API from C.
-    L->callStackTop->function   = NULL;
+    L->callStackTop->function   = &L->dummyObject;
     L->callStackTop->ip         = NULL;
     L->callStackTop->stackBase  = L->stackTop;
     L->callStackTop->stackTop   = L->stackTop;
     ++L->callStackTop;
 
-    memset(L->tagMethodName, 0, sizeof(L->tagMethodName));
-
     Gc_Initialize(&L->gc);
-
-    SetNil(&L->dummyObject);
 
     SetValue( &L->globals, Table_Create(L) );
     SetValue( &L->registry, Table_Create(L) );
-
-    for (int i = 0; i < NUM_TYPES; ++i)
-    {
-        L->metatable[i] = NULL;
-    }
 
     // Store the names for the different types, so we don't have to create new
     // strings when we want to return them.
