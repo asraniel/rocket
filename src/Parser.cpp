@@ -62,7 +62,9 @@ Function* Function_Create(lua_State* L)
 
 void Function_Destroy(lua_State* L, Function* function)
 {
-    Free(L, function->code, function->maxCodeSize * sizeof(Instruction));
+    FreeArray(L, function->function, function->maxFunctions);
+    FreeArray(L, function->code, function->maxCodeSize);
+    FreeArray(L, function->sourceLine, function->maxSourceLines);
     Free(L, function, sizeof(Function));
 }
 
@@ -605,11 +607,27 @@ static void Parser_FinalizeExitJumps(Parser* parser, Expression* value, int reg,
     value->exitJump[0] = -1;
 }
 
-bool Parser_ResolveCall(Parser* parser, Expression* value, int numResults)
+static bool GetHasExitJumps(Expression* value)
+{
+    return value->exitJump[0] != -1 || value->exitJump[1] != -1;
+}
+
+bool Parser_ResolveCall(Parser* parser, Expression* value, bool tail, int numResults)
 {
     if (value->type == EXPRESSION_CALL)
     {
-        Parser_EmitABC(parser, Opcode_Call, value->index, value->numArgs + 1, numResults + 1);
+
+        if (tail && !GetHasExitJumps(value))
+        {
+            // Tail calls always produce a variable number of results.
+            ASSERT(numResults == -1);
+            Parser_EmitABC(parser, Opcode_TailCall, value->index, value->numArgs + 1, 0);
+        }
+        else
+        {
+            Parser_EmitABC(parser, Opcode_Call, value->index, value->numArgs + 1, numResults + 1);
+        }
+        
         value->type = EXPRESSION_REGISTER;
         if (numResults != -1)
         {
@@ -799,11 +817,6 @@ void Parser_ResolveName(Parser* parser, Expression* dst, String* name)
    }
 }
 
-static bool GetHasExitJumps(Expression* value)
-{
-    return value->exitJump[0] != -1 || value->exitJump[1] != -1;
-}
-
 static void Parser_UpdateTempLocation(Parser* parser, Expression* value, int reg)
 {
     ASSERT(value->type == EXPRESSION_TEMP);
@@ -828,7 +841,7 @@ int Parser_MoveToRegister(Parser* parser, Expression* value, int reg)
         Parser_SetLastRegister(parser, reg);
     }
 
-    Parser_ResolveCall(parser, value, 1);
+    Parser_ResolveCall(parser, value, false, 1);
     Parser_ConvertToRegister(parser, value);
 
     if (value->type == EXPRESSION_REGISTER)
@@ -1058,6 +1071,8 @@ Prototype* Function_CreatePrototype(lua_State* L, Function* function, String* so
         function->numFunctions,
         function->numUpValues);
 
+    PushPrototype(L, prototype);
+
     // Store the up values.
     memcpy(prototype->upValue, function->upValue, sizeof(String*) * function->numUpValues);
 
@@ -1109,6 +1124,9 @@ Prototype* Function_CreatePrototype(lua_State* L, Function* function, String* so
     prototype->lastLineDefined  = 0;
 
     //PrintFunction(prototype);
+
+    ASSERT( (L->stackTop - 1)->object == prototype );
+    Pop(L, 1);
 
     return prototype;
 

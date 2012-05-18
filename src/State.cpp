@@ -15,11 +15,6 @@
 #include <string.h>
 #include <stdio.h>
 
-int AlignOffset(void* p, int align)
-{
-    return static_cast<int>((align - reinterpret_cast<ptrdiff_t>(p) % align) % align);
-}
-
 void* Allocate(lua_State* L, size_t size)
 {
     return Reallocate(L, NULL, 0, size);
@@ -135,23 +130,23 @@ lua_State* State_Create(lua_Alloc alloc, void* userdata)
     // Store the names for the different types, so we don't have to create new
     // strings when we want to return them.
     String* unknownName = String_Create(L, "unknown");
-    for (int i = 0; i < NUM_TYPES; ++i)
+    for (int i = 0; i < NUM_TYPES + 1; ++i)
     {
         L->typeName[i] = unknownName;
     }
 
-    L->typeName[LUA_TNONE]          = String_Create(L, "no value");
-    L->typeName[LUA_TNIL]           = String_Create(L, "nil");
-    L->typeName[LUA_TBOOLEAN]       = String_Create(L, "boolean");
-    L->typeName[LUA_TNUMBER]        = String_Create(L, "number");
-    L->typeName[LUA_TSTRING]        = String_Create(L, "string");
-    L->typeName[LUA_TTABLE]         = String_Create(L, "table");
-    L->typeName[LUA_TFUNCTION]      = String_Create(L, "function");
-    L->typeName[LUA_TLIGHTUSERDATA] = String_Create(L, "userdata");
-    L->typeName[LUA_TUSERDATA]      = L->typeName[LUA_TLIGHTUSERDATA];
-    L->typeName[LUA_TTHREAD]        = String_Create(L, "thread");
-    L->typeName[LUA_TUPVALUE]       = String_Create(L, "upval");
-    L->typeName[LUA_TPROTOTYPE]     = String_Create(L, "proto");
+    L->typeName[1 + LUA_TNONE]          = String_Create(L, "none");
+    L->typeName[1 + LUA_TNIL]           = String_Create(L, "nil");
+    L->typeName[1 + LUA_TBOOLEAN]       = String_Create(L, "boolean");
+    L->typeName[1 + LUA_TNUMBER]        = String_Create(L, "number");
+    L->typeName[1 + LUA_TSTRING]        = String_Create(L, "string");
+    L->typeName[1 + LUA_TTABLE]         = String_Create(L, "table");
+    L->typeName[1 + LUA_TFUNCTION]      = String_Create(L, "function");
+    L->typeName[1 + LUA_TLIGHTUSERDATA] = String_Create(L, "userdata");
+    L->typeName[1 + LUA_TUSERDATA]      = L->typeName[LUA_TLIGHTUSERDATA];
+    L->typeName[1 + LUA_TTHREAD]        = String_Create(L, "thread");
+    L->typeName[1 + LUA_TUPVALUE]       = String_Create(L, "upval");
+    L->typeName[1 + LUA_TPROTOTYPE]     = String_Create(L, "proto");
 
     // Store the tag method names so we don't need to create new strings
     // every time we want to access them.
@@ -184,6 +179,8 @@ lua_State* State_Create(lua_Alloc alloc, void* userdata)
 
 void State_Destroy(lua_State* L)
 {
+    StringPool_Shutdown(L, &L->stringPool);
+    Gc_Shutdown(L, &L->gc);
     L->alloc( L->userdata, L, 0, 0 );
 }
 
@@ -330,5 +327,5 @@ void State_Error(lua_State* L)
 
 String* State_TypeName(lua_State* L, int type)
 {
-    return L->typeName[type];
+    return L->typeName[type + 1];
 }

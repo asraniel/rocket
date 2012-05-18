@@ -64,23 +64,17 @@ struct lua_State
     Gc              gc;
     size_t          totalBytes;
     Table*          metatable[NUM_TYPES];   // Metatables for basic types.
-    String*         typeName[NUM_TYPES];
+    String*         typeName[NUM_TYPES + 1];
     String*         tagMethodName[TagMethod_NumMethods];
     CallFrame       callStackBase[LUAI_MAXCCALLS];
     StringPool      stringPool;
 };
 
-/**
- * Computes the number of bytes to offset a pointer to achieve the desired
- * alignemnt.
- */
-int AlignOffset(void* p, int align);
-
 void* Allocate(lua_State* L, size_t size);
 void* Reallocate(lua_State* L, void* p, size_t oldSize, size_t newSize);
 
 /**
- * Reserves space for one additional element in the array.
+ * Reserves space for additional elements in the array.
  */
 template <class T>
 void GrowArray(lua_State* L, T*& p, int numElements, int& maxElements)
@@ -92,6 +86,12 @@ void GrowArray(lua_State* L, T*& p, int numElements, int& maxElements)
         size_t newSize = maxElements * sizeof(T);
         p = (T*)Reallocate(L, p, oldSize, newSize);
     }
+}
+
+template <class T>
+void FreeArray(lua_State* L, T* p, int maxElements)
+{
+    Free(L, p, maxElements * sizeof(T));
 }
 
 /**

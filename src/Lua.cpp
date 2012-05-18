@@ -113,6 +113,11 @@ static Value* GetValueForIndex(lua_State* L, int index)
     return result;
 }
 
+static int GetStackSize(lua_State* L)
+{
+    return static_cast<int>(L->stackTop - L->stackBase);
+}
+
 static Table* GetCurrentEnvironment(lua_State *L)
 {
     Closure* closure = Vm_GetCurrentFunction(L);
@@ -807,8 +812,8 @@ int lua_getstack(lua_State* L, int level, lua_Debug* ar)
 {
     int callStackSize = Vm_GetCallStackSize(L);
     // Get the absolute index in the call stack.
-    int activeFunction = callStackSize - level - 1;
-    if (activeFunction < 0)
+    int activeFunction = callStackSize - level;
+    if (activeFunction < 1)
     {
         return 0;
     }
@@ -831,7 +836,7 @@ int lua_getinfo(lua_State* L, const char* what, lua_Debug* ar)
     }
     else
     {
-        luai_apicheck(L, ar->activeFunction < Vm_GetCallStackSize(L) );
+        luai_apicheck(L, ar->activeFunction <= Vm_GetCallStackSize(L) );
         frame = L->callStackBase + ar->activeFunction;
         if (frame->function != NULL)
         {
@@ -979,6 +984,9 @@ void* lua_newuserdata(lua_State* L, size_t size)
 
 int lua_setmetatable(lua_State* L, int index)
 {
+
+    luai_apicheck(L, GetStackSize(L) >= 1);
+
     Value* object    = GetValueForIndex(L, index);
     Value* metatable = GetValueForIndex(L, -1);
 
@@ -993,6 +1001,7 @@ int lua_setmetatable(lua_State* L, int index)
 
     Pop(L, 1);
     return 1;
+
 }
 
 int lua_getmetatable(lua_State* L, int index)

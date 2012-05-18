@@ -1148,6 +1148,12 @@ TEST_FIXTURE(GetUpValueLuaFunction, LuaFixture)
 
 }
 
+TEST_FIXTURE(GetStackEmpty, LuaFixture)
+{
+    lua_Debug ar;
+    CHECK( lua_getstack(L, 0, &ar) == 0);
+}
+
 TEST_FIXTURE(GetInfo, LuaFixture)
 {
 
@@ -3738,5 +3744,24 @@ TEST_FIXTURE(Objlen, LuaFixture)
     CHECK( lua_objlen(L, -1) == 2 );
     CHECK( lua_isstring(L, -1) );
     lua_pop(L, 1);
+
+}
+
+TEST_FIXTURE(TailCall, LuaFixture)
+{
+
+    const char* code =
+        "function g(x)\n"
+        "  return x\n"
+        "end\n"
+        "function f(x)\n"
+	    "  return g(x)\n"
+        "end\n"
+        "x = f(5)";
+
+    CHECK( DoString(L, code) );
+
+    lua_getglobal(L, "x");
+    CHECK_EQ( lua_tonumber(L, -1), 5.0 );
 
 }

@@ -18,6 +18,7 @@ extern "C"
 #include "String.h"
 #include "Table.h"
 #include "Function.h"
+#include "UpValue.h"
 
 #include <memory.h>
 
@@ -496,11 +497,13 @@ void Vm_Concat(lua_State* L, Value* dst, Value* arg1, Value* arg2)
         size_t length1 = arg1->string->length;
         size_t length2 = arg2->string->length;
 
+        // TODO: Create a reusable buffer for all concatenation operations.
         char* buffer = static_cast<char*>( Allocate(L, length1 + length2) );
         memcpy(buffer, String_GetData(arg1->string), length1);
         memcpy(buffer + length1, String_GetData(arg2->string), length2);
 
         SetValue( dst, String_Create(L, buffer, length1 + length2) );
+        Free(L, buffer, length1 + length2);
 
     }
 
@@ -821,7 +824,7 @@ static void ReturnFromLuaCall(lua_State* L, int result, int numResults)
 /**
  * Executes the function on the top of the call stack.
  */
-static int Execute(lua_State* L /*, int numArgs*/)
+static int Execute(lua_State* L)
 {
 
     // Assembly language VM.
@@ -876,6 +879,11 @@ Start:
 
     while (1)
     {
+
+    #ifdef DEBUG
+        const char* _file = String_GetData(prototype->source);
+        int         _line = prototype->sourceLine[ip - prototype->code];
+    #endif
 
         Instruction inst = *ip;
         ++ip;
@@ -956,12 +964,12 @@ Start:
         case Opcode_SetUpVal:
             {
                 const Value* value = &stackBase[a];
-                SetUpValue(lclosure, GET_B(inst), value);                    
+                UpValue_SetValue(lclosure, GET_B(inst), value);                    
             }
             break;
         case Opcode_GetUpVal:
             {
-                const Value* value = GetUpValue(lclosure, GET_B(inst));
+                const Value* value = UpValue_GetValue(lclosure, GET_B(inst));
                 stackBase[a] = *value;
             }
             break;
@@ -1002,7 +1010,7 @@ Start:
 
                 int numArgs     = GET_B(inst) - 1;
                 int numResults  = GET_C(inst) - 1;
-                Value* value   = &stackBase[a];
+                Value* value    = &stackBase[a];
                 
                 lua_CFunction function = PrepareCall(L, value, numArgs, numResults);
 
@@ -1032,23 +1040,60 @@ Start:
             break;
         case Opcode_TailCall:
             {
-                PROTECT(
-                    // TODO: Implement as an actual tail call (more efficient).
-                    int numArgs     = GET_B(inst) - 1;
-                    Value* value   = &stackBase[a];
-                    if (numArgs == -1)
-                    {
-                        // Use all of the values on the stack as arguments.
-                        numArgs = static_cast<int>(L->stackTop - value) - 1;
-                    }
-                    Vm_Call(L, value, numArgs, -1);
-                    int numResults = static_cast<int>(L->stackTop - value);
-                    numResults = MoveResults(L, frame->function, &stackBase[a], numResults);
+
+                int numArgs     = GET_B(inst) - 1;
+                Value* value    = &stackBase[a];
+                
+                lua_CFunction function = PrepareCall(L, value, numArgs, -1);
+
+                if (function != NULL)
+                {
+                    // Call the C function immediately.
+                    int result = function(L);
+                    ReturnFromCCall(L, result, -1);
+                }
+                else
+                {
+                    // Since we're effectively returning from the current function
+                    // with the tail call, we need to close the up values.
                     if (L->openUpValue != NULL)
                     {
                         CloseUpValues(L, stackBase);
                     }
-                )
+
+                    CallFrame* newFrame = frame + 1;
+
+                    // Reuse the stack from the previous call.
+                    Value* dst = frame->function;
+                    Value* src = newFrame->function;
+                    while (src < newFrame->stackTop)
+                    {
+                        *dst = *src;
+                        ++dst;
+                        ++src;
+                    }
+                    frame->stackBase = frame->function + (newFrame->stackBase - newFrame->function);
+                    frame->stackTop  = dst;
+
+                    // Reuse the frame from the previous call. We preserve the
+                    // number of results that the current call is expected to
+                    // return since the return from the tail call will return
+                    // from the current function as well.
+
+                    // Note that we copied thenew function into the location of
+                    // the old function, so we don't need to update the previous
+                    // call frame.
+
+                    frame->ip = newFrame->ip;
+                    --L->callStackTop;
+
+                    // "Re-enter" the function to start execution in the new Lua
+                    // function.
+                    L->stackBase = frame->stackBase;
+                    L->stackTop  = frame->stackTop;
+                    goto Start;
+                }
+             
             }
             break;
         case Opcode_Return:
@@ -1078,7 +1123,8 @@ Start:
                     // instruction will restore it).
                     if (frame->numResults >= 0)
                     {
-                        L->stackTop = frame->stackTop;
+                        CallFrame* prevFrame = frame - 1;
+                        L->stackTop = prevFrame->stackTop;
                     }
                     goto Start;
                 }
@@ -1198,7 +1244,8 @@ Start:
                     int b = GET_B(inst);
                     if ( GET_OPCODE(inst) == Opcode_Move )
                     {
-                        c->lclosure.upValue[i] = NewUpValue(L, &stackBase[b]);
+                        c->lclosure.upValue[i] = UpValue_Create(L, &stackBase[b]);
+                        Gc_WriteBarrier(L, c, c->lclosure.upValue[i]);
                     }
                     else
                     {
@@ -1509,5 +1556,6 @@ void Vm_Call(lua_State* L, Value* value, int numArgs, int numResults)
 
 int Vm_GetCallStackSize(lua_State* L)
 {
-    return static_cast<int>(L->callStackTop - L->callStackBase);
+    // Remove 1 element since the bottom of the call stack isn't a valid entry.
+    return static_cast<int>(L->callStackTop - L->callStackBase) - 1;
 }
