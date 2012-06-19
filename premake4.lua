@@ -25,22 +25,13 @@ project "Rocket"
     kind "SharedLib"
     location "build"
     language "C++"
-    files { "src/*.h", "src/*.c", "src/*.cpp", "src/*.inl", "src/*.asm", "include/*.h" }
+    files { "src/*.h", "src/*.c", "src/*.cpp", "src/*.inl", "src/*.asm", "include/*.h", "src/AuxLib/*.h", "src/AuxLib/*.c", "src/AuxLib/*.cpp" }
     includedirs { "include" }
-    links { "AuxLib" }
-	if os.is("windows") then
-		linkoptions { [[/DEF:"../src/Rocket.def"]] }
-	end
+    if os.is("windows") then
+      linkoptions { [[/DEF:"../src/Rocket.def"]] }
+    end
     defines { "ROCKET_EXPORTS", "LUA_CORE" }
      
--- Auxiliary library     
-project "AuxLib"
-    kind "StaticLib"
-    location "build"
-    language "C++"
-    files { "src/AuxLib/*.h", "src/AuxLib/*.c", "src/AuxLib/*.cpp" }
-    includedirs { "include" }
-
 -- Unit test     
 project "Test"
     kind "ConsoleApp"

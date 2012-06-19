@@ -81,6 +81,6 @@ void Gc_WriteBarrier(Gc* gc, Gc_Object* parent, const Value* child);
 
 void Gc_MarkObject(Gc* gc, Gc_Object* object);
 
-#include "Gc.inl"
+//#include "Gc.inl"
 
 #endif
